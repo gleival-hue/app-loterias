@@ -33,14 +33,13 @@ function calcularProbabilidade(totalNumeros, dezenasMarcadas) {
   };
 }
 
-// Rota de Sincronização Automática com Tratamento de Erros e Múltiplas Fontes
+// Rota de Concurso
 app.get('/api/concurso/:tipo', async (req, res) => {
   const tipo = req.params.tipo.toLowerCase();
   const config = CONFIG_LOTERIAS[tipo] || CONFIG_LOTERIAS.lotofacil;
 
   let dadosFormatados = null;
 
-  // Fonte 1: API Guidi Loterias (Aberta e rápida)
   try {
     const resp = await axios.get(`https://loteriascaixa-api.herokuapp.com/api/${tipo}/latest`, { timeout: 3000 });
     const d = resp.data;
@@ -57,11 +56,8 @@ app.get('/api/concurso/:tipo', async (req, res) => {
         padraoMarcar: config.padraoMarcar
       };
     }
-  } catch (e) {
-    console.log('Fonte 1 indisponível, tentando Fonte 2...');
-  }
+  } catch (e) {}
 
-  // Fonte 2: Caixa Oficial (Fallback)
   if (!dadosFormatados) {
     try {
       const respCaixa = await axios.get(`https://servicebus2.caixa.gov.br/portaldeloterias/api/${tipo}`, {
@@ -80,12 +76,9 @@ app.get('/api/concurso/:tipo', async (req, res) => {
         totalDezenas: config.totalDezenas,
         padraoMarcar: config.padraoMarcar
       };
-    } catch (e) {
-      console.log('Fonte 2 indisponível, aplicando fallback simulado...');
-    }
+    } catch (e) {}
   }
 
-  // Fonte 3: Fallback de Segurança caso as APIs estejam temporariamente fora do ar
   if (!dadosFormatados || !dadosFormatados.concurso) {
     dadosFormatados = {
       tipo: tipo,
@@ -105,7 +98,7 @@ app.get('/api/concurso/:tipo', async (req, res) => {
   res.json(dadosFormatados);
 });
 
-// Rota de Geração de Palpites
+// Rota de Palpites
 app.post('/api/palpite', (req, res) => {
   const { tipo, marcar, minPares, maxPares, minPrimos, maxPrimos, concursoAtual } = req.body;
   const config = CONFIG_LOTERIAS[tipo] || CONFIG_LOTERIAS.lotofacil;
@@ -156,7 +149,7 @@ app.post('/api/palpite', (req, res) => {
   });
 });
 
-// Interface Web Frontend
+// Interface Web Frontend com Histórico
 app.get('*', (req, res) => {
   res.send(`
     <!DOCTYPE html>
@@ -168,63 +161,109 @@ app.get('*', (req, res) => {
       <style>
         body { font-family: 'Segoe UI', Arial, sans-serif; background: #f0f2f5; margin: 0; padding: 15px; color: #333; }
         .container { max-width: 600px; margin: 0 auto; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        
+        /* Abas Principais */
+        .nav-abas { display: flex; border-bottom: 2px solid #e0e0e0; margin-bottom: 20px; }
+        .aba-item { flex: 1; padding: 12px; text-align: center; font-weight: bold; cursor: pointer; color: #666; border-bottom: 3px solid transparent; }
+        .aba-item.ativa { color: #0288d1; border-bottom-color: #0288d1; }
+
         .seletor-loteria { display: flex; gap: 8px; margin-bottom: 20px; }
         .btn-loteria { flex: 1; padding: 10px; border: 2px solid #0288d1; background: white; color: #0288d1; border-radius: 6px; font-weight: bold; cursor: pointer; text-align: center; }
         .btn-loteria.ativo { background: #0288d1; color: white; }
+        
         .card-concurso { background: #e3f2fd; padding: 16px; border-radius: 8px; margin-bottom: 20px; }
         .status-badge { display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; color: white; }
         .acumulado { background: #d32f2f; }
         .sorteado { background: #2e7d32; }
+        
         .mapa-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-top: 10px; }
         .num-mapa { padding: 8px; text-align: center; border-radius: 4px; font-size: 12px; font-weight: bold; background: #eee; }
         .num-mapa.sorteado { background: #2e7d32; color: white; }
+        
         .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px; }
         .field { display: flex; flex-direction: column; gap: 4px; }
         label { font-size: 12px; font-weight: bold; }
         input { padding: 8px; border: 1px solid #ccc; border-radius: 5px; width: 100%; box-sizing: border-box; }
+        
         button.btn-gerar { width: 100%; padding: 12px; background: #2e7d32; color: white; border: none; border-radius: 6px; font-size: 16px; font-weight: bold; cursor: pointer; margin-top: 10px; }
+        button.btn-salvar { width: 100%; padding: 10px; background: #ff9800; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; margin-top: 12px; }
+        
         .painel-resultado { margin-top: 20px; padding-top: 15px; border-top: 2px dashed #ddd; }
         .bola { display: inline-flex; width: 36px; height: 36px; border-radius: 50%; background: #0288d1; color: white; justify-content: center; align-items: center; font-weight: bold; margin: 3px; font-size: 14px; }
         .box-probabilidade { background: #fff3e0; padding: 10px; border-radius: 6px; margin-top: 10px; border-left: 4px solid #ff9800; font-size: 13px; }
+        
+        /* Estilos do Histórico */
+        .card-historico { background: #f8f9fa; border: 1px solid #e0e0e0; border-radius: 8px; padding: 15px; margin-bottom: 12px; position: relative; }
+        .btn-apagar { position: absolute; top: 12px; right: 12px; background: #ff3d00; color: white; border: none; border-radius: 4px; padding: 4px 8px; cursor: pointer; font-size: 12px; }
       </style>
     </head>
     <body>
       <div class="container">
-        <h2>Portal & Palpites de Loterias</h2>
+        <!-- Navegação por Abas -->
+        <div class="nav-abas">
+          <div class="aba-item ativa" id="aba-gerador-btn" onclick="mudarAba('gerador')">Gerar Palpites</div>
+          <div class="aba-item" id="aba-historico-btn" onclick="mudarAba('historico')">Meus Jogos Salvos (<span id="qtd-salvos">0</span>)</div>
+        </div>
         
-        <div class="seletor-loteria">
-          <div class="btn-loteria ativo" id="btn-lotofacil" onclick="trocarLoteria('lotofacil')">Lotofácil</div>
-          <div class="btn-loteria" id="btn-megasena" onclick="trocarLoteria('megasena')">Mega-Sena</div>
-          <div class="btn-loteria" id="btn-quina" onclick="trocarLoteria('quina')">Quina</div>
+        <!-- Conteúdo 1: Gerador de Palpites -->
+        <div id="secao-gerador">
+          <div class="seletor-loteria">
+            <div class="btn-loteria ativo" id="btn-lotofacil" onclick="trocarLoteria('lotofacil')">Lotofácil</div>
+            <div class="btn-loteria" id="btn-megasena" onclick="trocarLoteria('megasena')">Mega-Sena</div>
+            <div class="btn-loteria" id="btn-quina" onclick="trocarLoteria('quina')">Quina</div>
+          </div>
+
+          <div id="card-caixa" class="card-concurso">
+            A carregar informações oficiais...
+          </div>
+
+          <h3>Gerar Palpite Filtrado</h3>
+          <form id="form-palpite">
+            <div class="form-grid">
+              <div class="field"><label>Dezenas a Marcar:</label><input type="number" id="marcar" value="15"></div>
+              <div class="field"><label>Nº Atrasados:</label><input type="number" id="atrasados" value="3"></div>
+            </div>
+            <div class="form-grid">
+              <div class="field"><label>Mín. Pares:</label><input type="number" id="minPares" value="7"></div>
+              <div class="field"><label>Máx. Pares:</label><input type="number" id="maxPares" value="8"></div>
+            </div>
+            <div class="form-grid">
+              <div class="field"><label>Mín. Primos:</label><input type="number" id="minPrimos" value="5"></div>
+              <div class="field"><label>Máx. Primos:</label><input type="number" id="maxPrimos" value="6"></div>
+            </div>
+            <button type="submit" class="btn-gerar">Gerar Palpite Inteligente</button>
+          </form>
+
+          <div id="painel-palpite" class="painel-resultado" style="display:none;"></div>
         </div>
 
-        <div id="card-caixa" class="card-concurso">
-          A carregar informações oficiais...
+        <!-- Conteúdo 2: Meus Jogos Salvos -->
+        <div id="secao-historico" style="display:none;">
+          <h3>Histórico de Jogos Guardados</h3>
+          <p style="font-size:13px; color:#666;">Estes são os palpites que guardou para jogar nas lotarias.</p>
+          <div id="lista-jogos"></div>
         </div>
-
-        <h3>Gerar Palpite Filtrado</h3>
-        <form id="form-palpite">
-          <div class="form-grid">
-            <div class="field"><label>Dezenas a Marcar:</label><input type="number" id="marcar" value="15"></div>
-            <div class="field"><label>Nº Atrasados:</label><input type="number" id="atrasados" value="3"></div>
-          </div>
-          <div class="form-grid">
-            <div class="field"><label>Mín. Pares:</label><input type="number" id="minPares" value="7"></div>
-            <div class="field"><label>Máx. Pares:</label><input type="number" id="maxPares" value="8"></div>
-          </div>
-          <div class="form-grid">
-            <div class="field"><label>Mín. Primos:</label><input type="number" id="minPrimos" value="5"></div>
-            <div class="field"><label>Máx. Primos:</label><input type="number" id="maxPrimos" value="6"></div>
-          </div>
-          <button type="submit" class="btn-gerar">Gerar Palpite Inteligente</button>
-        </form>
-
-        <div id="painel-palpite" class="painel-resultado" style="display:none;"></div>
       </div>
 
       <script>
         let loteriaAtual = 'lotofacil';
         let dadosConcursoAtual = null;
+        let palpiteAtual = null;
+
+        function mudarAba(aba) {
+          if(aba === 'gerador') {
+            document.getElementById('secao-gerador').style.display = 'block';
+            document.getElementById('secao-historico').style.display = 'none';
+            document.getElementById('aba-gerador-btn').classList.add('ativa');
+            document.getElementById('aba-historico-btn').classList.remove('ativa');
+          } else {
+            document.getElementById('secao-gerador').style.display = 'none';
+            document.getElementById('secao-historico').style.display = 'block';
+            document.getElementById('aba-gerador-btn').classList.remove('ativa');
+            document.getElementById('aba-historico-btn').classList.add('ativa');
+            renderizarHistorico();
+          }
+        }
 
         async function carregarDados(tipo) {
           document.getElementById('card-caixa').innerHTML = 'A carregar dados atualizados...';
@@ -307,6 +346,8 @@ app.get('*', (req, res) => {
             return;
           }
 
+          palpiteAtual = data;
+
           let bolasHtml = '';
           data.palpite.forEach(num => {
             bolasHtml += \`<div class="bola">\${num < 10 ? '0' + num : num}</div>\`;
@@ -323,10 +364,78 @@ app.get('*', (req, res) => {
               📊 <strong>Calculadora de Probabilidades:</strong><br>
               Sua chance de acertar o prêmio principal com este jogo é de <strong>\${data.probabilidade.chanceFormatada}</strong> (\${data.probabilidade.probabilidadePorcentagem}).
             </div>
+            <button class="btn-salvar" onclick="salvarPalpite()">⭐ Guardar este Palpite no Telemóvel</button>
           \`;
         });
 
+        // Lógica do LocalStorage (Histórico Salvo)
+        function obterJogosSalvos() {
+          return JSON.parse(localStorage.getItem('meus_jogos_loterias') || '[]');
+        }
+
+        function atualizarContador() {
+          const salvos = obterJogosSalvos();
+          document.getElementById('qtd-salvos').innerText = salvos.length;
+        }
+
+        function salvarPalpite() {
+          if(!palpiteAtual) return;
+          const salvos = obterJogosSalvos();
+          
+          const novoJogo = {
+            id: Date.now(),
+            dataCriacao: new Date().toLocaleDateString('pt-BR') + ' às ' + new Date().toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'}),
+            loteria: palpiteAtual.loteria,
+            concursoAlvo: palpiteAtual.concursoAlvo,
+            palpite: palpiteAtual.palpite
+          };
+
+          salvos.unshift(novoJogo);
+          localStorage.setItem('meus_jogos_loterias', JSON.stringify(salvos));
+          atualizarContador();
+          alert('Palpite guardado com sucesso no seu telemóvel!');
+        }
+
+        function apagarJogo(id) {
+          let salvos = obterJogosSalvos();
+          salvos = salvos.filter(j => j.id !== id);
+          localStorage.setItem('meus_jogos_loterias', JSON.stringify(salvos));
+          atualizarContador();
+          renderizarHistorico();
+        }
+
+        function renderizarHistorico() {
+          const salvos = obterJogosSalvos();
+          const divLista = document.getElementById('lista-jogos');
+
+          if(salvos.length === 0) {
+            divLista.innerHTML = '<p style="color:#999; text-align:center; margin-top:30px;">Nenhum jogo guardado ainda.<br>Gere um palpite e clique em "Guardar este Palpite".</p>';
+            return;
+          }
+
+          let html = '';
+          salvos.forEach(jogo => {
+            let bolasHtml = '';
+            jogo.palpite.forEach(num => {
+              bolasHtml += \`<div class="bola">\${num < 10 ? '0' + num : num}</div>\`;
+            });
+
+            html += \`
+              <div class="card-historico">
+                <button class="btn-apagar" onclick="apagarJogo(\${jogo.id})">Apagar</button>
+                <strong>\${jogo.loteria} - Concurso #\${jogo.concursoAlvo}</strong><br>
+                <small style="color:#777;">Guardado em: \${jogo.dataCriacao}</small>
+                <div style="margin-top:10px;">\${bolasHtml}</div>
+              </div>
+            \`;
+          });
+
+          divLista.innerHTML = html;
+        }
+
+        // Inicialização
         carregarDados('lotofacil');
+        atualizarContador();
       </script>
     </body>
     </html>
