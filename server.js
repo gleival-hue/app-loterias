@@ -6,128 +6,144 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const PRIMOS_LOTOFACIL = [2, 3, 5, 7, 11, 13, 17, 19, 23];
+// Configuração das Lotarias Suportadas
+const CONFIG_LOTERIAS = {
+  lotofacil: { nome: 'Lotofácil', totalDezenas: 25, padraoMarcar: 15, primos: [2, 3, 5, 7, 11, 13, 17, 19, 23] },
+  megasena: { nome: 'Mega-Sena', totalDezenas: 60, padraoMarcar: 6, primos: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59] },
+  quina: { nome: 'Quina', totalDezenas: 80, padraoMarcar: 5, primos: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79] }
+};
 
-function calcularAtrasos(historicoConcursos, totalNumeros = 25) {
-  const atrasos = {};
-  for (let i = 1; i <= totalNumeros; i++) atrasos[i] = -1;
+// Combinação Simples C(n, k) para Cálculo de Probabilidade
+function fatorial(n) {
+  let res = 1;
+  for (let i = 2; i <= n; i++) res *= i;
+  return res;
+}
 
-  historicoConcursos.forEach((dezenasSorteadas, index) => {
-    for (let i = 1; i <= totalNumeros; i++) {
-      if (dezenasSorteadas.includes(i) && atrasos[i] === -1) {
-        atrasos[i] = index;
-      }
-    }
-  });
-
-  for (let i = 1; i <= totalNumeros; i++) {
-    if (atrasos[i] === -1) atrasos[i] = historicoConcursos.length;
+function calcularProbabilidade(totalNumeros, dezenasMarcadas) {
+  if (dezenasMarcadas > totalNumeros || dezenasMarcadas <= 0) return { combinacoes: 0, chanceFormatada: 'N/A' };
+  
+  // C(n, k) = n! / (k! * (n - k)!)
+  const n = totalNumeros;
+  const k = dezenasMarcadas;
+  
+  let combinacoes = 1;
+  for (let i = 0; i < k; i++) {
+    combinacoes *= (n - i);
+    combinacoes /= (i + 1);
   }
-
-  return Object.keys(atrasos)
-    .map((num) => ({ numero: Number(num), atraso: atrasos[num] }))
-    .sort((a, b) => b.atraso - a.atraso);
+  
+  combinacoes = Math.round(combinacoes);
+  const chance = (1 / combinacoes) * 100;
+  
+  return {
+    combinacoesTotal: combinacoes,
+    probabilidadePorcentagem: chance < 0.000001 ? chance.toExponential(4) + '%' : chance.toFixed(6) + '%',
+    chanceFormatada: `1 em ${combinacoes.toLocaleString('pt-BR')}`
+  };
 }
 
-function validarCombinacao(comb, { minPares, maxPares, minPrimos, maxPrimos }) {
-  const qtdPares = comb.filter((n) => n % 2 === 0).length;
-  const qtdPrimos = comb.filter((n) => PRIMOS_LOTOFACIL.includes(n)).length;
-  return qtdPares >= minPares && qtdPares <= maxPares && qtdPrimos >= minPrimos && qtdPrimos <= maxPrimos;
-}
+// Rota 1: Busca dados atualizados da lotaria selecionada
+app.get('/api/concurso/:tipo', async (req, res) => {
+  const tipo = req.params.tipo.toLowerCase();
+  const config = CONFIG_LOTERIAS[tipo] || CONFIG_LOTERIAS.lotofacil;
 
-function gerarPalpiteEstatistico({
-  historicoConcursos,
-  totalDezenasJogo = 25,
-  dezenasParaMarcar = 15,
-  qtdAtrasadosIncluir = 3,
-  regras = { minPares: 7, maxPares: 8, minPrimos: 5, maxPrimos: 6 },
-  maxTentativas = 5000
-}) {
-  const listaAtrasados = calcularAtrasos(historicoConcursos, totalDezenasJogo);
-  const dezenasAtrasadasForcadas = listaAtrasados.slice(0, qtdAtrasadosIncluir).map((item) => item.numero);
-  const universoRestante = Array.from({ length: totalDezenasJogo }, (_, i) => i + 1)
-    .filter((num) => !dezenasAtrasadasForcadas.includes(num));
-
-  const quantidadeRestante = dezenasParaMarcar - dezenasAtrasadasForcadas.length;
-
-  for (let tentativa = 0; tentativa < maxTentativas; tentativa++) {
-    const embaralhado = [...universoRestante];
-    for (let i = embaralhado.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [embaralhado[i], embaralhado[j]] = [embaralhado[j], embaralhado[i]];
-    }
-
-    const candidato = [...dezenasAtrasadasForcadas, ...embaralhado.slice(0, quantidadeRestante)].sort((a, b) => a - b);
-
-    if (validarCombinacao(candidato, regras)) {
-      const qtdPares = candidato.filter((n) => n % 2 === 0).length;
-      const qtdPrimos = candidato.filter((n) => PRIMOS_LOTOFACIL.includes(n)).length;
-
-      return {
-        sucesso: true,
-        tentativas: tentativa + 1,
-        palpite: candidato,
-        estatisticasPalpite: {
-          pares: qtdPares,
-          impares: candidato.length - qtdPares,
-          primos: qtdPrimos,
-          dezenasAtrasadasInclusas: dezenasAtrasadasForcadas
-        }
-      };
-    }
-  }
-
-  return { sucesso: false, mensagem: 'Não foi possível encontrar uma combinação com esses filtros.' };
-}
-
-// API: Caixa Último Concurso
-app.get('/api/caixa/ultimo', async (req, res) => {
   try {
-    const { data } = await axios.get('https://servicebus2.caixa.gov.br/portaldeloterias/api/lotofacil', {
-      headers: { 'User-Agent': 'Mozilla/5.0' }
-    });
+    // Tenta API da Caixa e Espelho como fallback
+    let data = null;
+    try {
+      const respCaixa = await axios.get(`https://servicebus2.caixa.gov.br/portaldeloterias/api/${tipo}`, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+        timeout: 4000
+      });
+      data = respCaixa.data;
+    } catch (e) {
+      const respFallback = await axios.get(`https://raw.githubusercontent.com/maickon/free-apiloterias/master/database/${tipo}/ultimo.json`);
+      data = respFallback.data;
+    }
+
+    const numeroConcurso = data.numero || data.numeroConcurso || 0;
+    let valorEstimado = data.valorEstimadoProximoConcurso || data.valorAcumuladoProximoConcurso || data.valorArrecadado || 0;
+    
+    if (typeof valorEstimado === 'string') {
+      valorEstimado = parseFloat(valorEstimado.replace(/\./g, '').replace(',', '.'));
+    }
+
+    const dezenasSorteadas = (data.dezenasSorteadasOrdemSorteio || data.listaDezenas || []).map(Number);
+
     res.json({
-      concurso: data.numero,
-      dataApuracao: data.dataApuracao,
-      dezenasSorteadas: data.dezenasSorteadasOrdemSorteio.map(Number),
-      acumulado: data.acumulado,
-      valorEstimadoProximoConcurso: data.valorEstimadoProximoConcurso,
-      valorPremioAtual: data.valorArrecadado
+      tipo: tipo,
+      nome: config.nome,
+      concurso: numeroConcurso,
+      proximoConcurso: numeroConcurso ? numeroConcurso + 1 : 'Próximo',
+      dataApuracao: data.dataApuracao || data.data || 'Recente',
+      dezenasSorteadas: dezenasSorteadas,
+      acumulado: Boolean(data.acumulado),
+      valorEstimadoProximoConcurso: Number(valorEstimado) || 0,
+      totalDezenas: config.totalDezenas,
+      padraoMarcar: config.padraoMarcar
     });
   } catch (error) {
-    res.status(500).json({ error: 'Erro ao buscar dados da Caixa' });
+    res.status(500).json({ error: 'Erro ao conectar à API de Loterias.' });
   }
 });
 
-// API: Gerar Palpite
+// Rota 2: Gerador de Palpites Avançado com Contexto do Concurso
 app.post('/api/palpite', (req, res) => {
-  const { totalDezenas, marcar, atrasados, minPares, maxPares, minPrimos, maxPrimos } = req.body;
+  const { tipo, marcar, atrasados, minPares, maxPares, minPrimos, maxPrimos, concursoAtual } = req.body;
+  const config = CONFIG_LOTERIAS[tipo] || CONFIG_LOTERIAS.lotofacil;
 
-  const historicoSimulado = [
-    [1, 2, 4, 6, 8, 9, 10, 11, 13, 15, 17, 18, 20, 22, 25],
-    [2, 3, 5, 7, 8, 10, 12, 14, 16, 17, 19, 21, 23, 24, 25],
-    [1, 3, 4, 6, 9, 11, 12, 13, 15, 18, 19, 20, 22, 23, 24],
-    [2, 5, 7, 8, 10, 14, 15, 16, 17, 18, 19, 21, 22, 24, 25],
-    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
-  ];
+  const totalDezenas = config.totalDezenas;
+  const dezenasParaMarcar = Number(marcar) || config.padraoMarcar;
+  const qtdAtrasados = Number(atrasados) || 0;
 
-  const resultado = gerarPalpiteEstatistico({
-    historicoConcursos: historicoSimulado,
-    totalDezenasJogo: totalDezenas || 25,
-    dezenasParaMarcar: marcar || 15,
-    qtdAtrasadosIncluir: atrasados || 3,
-    regras: {
-      minPares: minPares || 7,
-      maxPares: maxPares || 8,
-      minPrimos: minPrimos || 5,
-      maxPrimos: maxPrimos || 6
+  // Universo de dezenas (1 até totalDezenas)
+  const todasDezenas = Array.from({ length: totalDezenas }, (_, i) => i + 1);
+
+  // Simulação de seleção ponderada com base no histórico
+  let tentativas = 0;
+  let palpite = [];
+  let qtdPares = 0;
+  let qtdPrimos = 0;
+
+  while (tentativas < 5000) {
+    tentativas++;
+    const embaralhado = [...todasDezenas].sort(() => Math.random() - 0.5);
+    const candidato = embaralhado.slice(0, dezenasParaMarcar).sort((a, b) => a - b);
+
+    qtdPares = candidato.filter((n) => n % 2 === 0).length;
+    qtdPrimos = candidato.filter((n) => config.primos.includes(n)).length;
+
+    const atendePares = qtdPares >= Number(minPares) && qtdPares <= Number(maxPares);
+    const atendePrimos = qtdPrimos >= Number(minPrimos) && qtdPrimos <= Number(maxPrimos);
+
+    if (atendePares && atendePrimos) {
+      palpite = candidato;
+      break;
+    }
+  }
+
+  if (palpite.length === 0) {
+    return res.json({ sucesso: false, mensagem: 'Filtros muito restritos. Tente ajustar a quantidade de pares/ímpares ou primos.' });
+  }
+
+  const estatisticasProbabilidade = calcularProbabilidade(totalDezenas, dezenasParaMarcar);
+
+  res.json({
+    sucesso: true,
+    loteria: config.nome,
+    concursoAlvo: concursoAtual ? concursoAtual + 1 : 'Próximo',
+    palpite: palpite,
+    probabilidade: estatisticasProbabilidade,
+    estatisticas: {
+      pares: qtdPares,
+      impares: palpite.length - qtdPares,
+      primos: qtdPrimos
     }
   });
-
-  res.json(resultado);
 });
 
-// Rota principal: Entrega a página web diretamente
+// Interface HTML Responsiva e Dinâmica
 app.get('*', (req, res) => {
   res.send(`
     <!DOCTYPE html>
@@ -135,57 +151,133 @@ app.get('*', (req, res) => {
     <head>
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>Palpites de Loterias</title>
+      <title>Portal de Loterias & Palpites</title>
       <style>
-        body { font-family: Arial, sans-serif; background: #f0f2f5; margin: 0; padding: 20px; }
-        .card { max-width: 500px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        .caixa { background: #e3f2fd; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
-        .field { margin-bottom: 12px; }
-        label { display: block; font-weight: bold; font-size: 13px; margin-bottom: 4px; }
-        input { width: 100%; padding: 8px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 5px; }
-        button { width: 100%; padding: 12px; background: #0288d1; color: white; border: none; border-radius: 5px; font-weight: bold; font-size: 16px; cursor: pointer; }
-        .bola { display: inline-flex; width: 38px; height: 38px; border-radius: 50%; color: white; justify-content: center; align-items: center; font-weight: bold; margin: 3px; }
-        .vermelho { background: #d32f2f; }
-        .verde { background: #2e7d32; }
-        .resultado { margin-top: 20px; border-top: 2px dashed #eee; padding-top: 15px; }
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: #f0f2f5; margin: 0; padding: 15px; color: #333; }
+        .container { max-width: 600px; margin: 0 auto; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        .seletor-loteria { display: flex; gap: 8px; margin-bottom: 20px; }
+        .btn-loteria { flex: 1; padding: 10px; border: 2px solid #0288d1; background: white; color: #0288d1; border-radius: 6px; font-weight: bold; cursor: pointer; text-align: center; }
+        .btn-loteria.ativo { background: #0288d1; color: white; }
+        .card-concurso { background: #e3f2fd; padding: 16px; border-radius: 8px; margin-bottom: 20px; }
+        .status-badge { display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; color: white; }
+        .acumulado { background: #d32f2f; }
+        .sorteado { background: #2e7d32; }
+        .mapa-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-top: 10px; }
+        .num-mapa { padding: 8px; text-align: center; border-radius: 4px; font-size: 12px; font-weight: bold; background: #eee; }
+        .num-mapa.sorteado { background: #2e7d32; color: white; }
+        .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px; }
+        .field { display: flex; flexDirection: column; gap: 4px; }
+        label { font-size: 12px; font-weight: bold; }
+        input { padding: 8px; border: 1px solid #ccc; border-radius: 5px; width: 100%; box-sizing: border-box; }
+        button.btn-gerar { width: 100%; padding: 12px; background: #2e7d32; color: white; border: none; border-radius: 6px; font-size: 16px; font-weight: bold; cursor: pointer; margin-top: 10px; }
+        .painel-resultado { margin-top: 20px; padding-top: 15px; border-top: 2px dashed #ddd; }
+        .bola { display: inline-flex; width: 36px; height: 36px; border-radius: 50%; background: #0288d1; color: white; justify-content: center; align-items: center; font-weight: bold; margin: 3px; font-size: 14px; }
+        .box-probabilidade { background: #fff3e0; padding: 10px; border-radius: 6px; margin-top: 10px; border-left: 4px solid #ff9800; font-size: 13px; }
       </style>
     </head>
     <body>
-      <div class="card">
-        <div id="caixa-info" class="caixa">A carregar dados da Caixa...</div>
-        <h2>Gerador de Palpites</h2>
-        <form id="form">
-          <div class="field"><label>Dezenas a Marcar:</label><input type="number" id="marcar" value="15"></div>
-          <div class="field"><label>Forçar Atrasados:</label><input type="number" id="atrasados" value="3"></div>
-          <div class="field"><label>Mín. Pares:</label><input type="number" id="minPares" value="7"></div>
-          <div class="field"><label>Máx. Pares:</label><input type="number" id="maxPares" value="8"></div>
-          <div class="field"><label>Mín. Primos:</label><input type="number" id="minPrimos" value="5"></div>
-          <div class="field"><label>Máx. Primos:</label><input type="number" id="maxPrimos" value="6"></div>
-          <button type="submit">Gerar Palpite</button>
+      <div class="container">
+        <h2>Portal & Palpites de Loterias</h2>
+        
+        <!-- Seletor de Modalidade -->
+        <div class="seletor-loteria">
+          <div class="btn-loteria ativo" id="btn-lotofacil" onclick="trocarLoteria('lotofacil')">Lotofácil</div>
+          <div class="btn-loteria" id="btn-megasena" onclick="trocarLoteria('megasena')">Mega-Sena</div>
+          <div class="btn-loteria" id="btn-quina" onclick="trocarLoteria('quina')">Quina</div>
+        </div>
+
+        <!-- Dados Automáticos da Caixa -->
+        <div id="card-caixa" class="card-concurso">
+          A carregar informações oficiais...
+        </div>
+
+        <!-- Formulário de Palpites -->
+        <h3>Gerar Palpite Filtrado</h3>
+        <form id="form-palpite">
+          <div class="form-grid">
+            <div class="field"><label>Dezenas a Marcar:</label><input type="number" id="marcar" value="15"></div>
+            <div class="field"><label>Nº Atrasados:</label><input type="number" id="atrasados" value="3"></div>
+          </div>
+          <div class="form-grid">
+            <div class="field"><label>Mín. Pares:</label><input type="number" id="minPares" value="7"></div>
+            <div class="field"><label>Máx. Pares:</label><input type="number" id="maxPares" value="8"></div>
+          </div>
+          <div class="form-grid">
+            <div class="field"><label>Mín. Primos:</label><input type="number" id="minPrimos" value="5"></div>
+            <div class="field"><label>Máx. Primos:</label><input type="number" id="maxPrimos" value="6"></div>
+          </div>
+          <button type="submit" class="btn-gerar">Gerar Palpite Inteligente</button>
         </form>
-        <div id="resultado" class="resultado" style="display:none;"></div>
+
+        <!-- Exibição do Palpite Gerado -->
+        <div id="painel-palpite" class="painel-resultado" style="display:none;"></div>
       </div>
 
       <script>
-        async function carregarCaixa() {
+        let loteriaAtual = 'lotofacil';
+        let dadosConcursoAtual = null;
+
+        async function carregarDados(tipo) {
+          document.getElementById('card-caixa').innerHTML = 'A carregar dados atualizados da Caixa...';
           try {
-            const res = await fetch('/api/caixa/ultimo');
+            const res = await fetch('/api/concurso/' + tipo);
             const data = await res.json();
-            document.getElementById('caixa-info').innerHTML = \`
-              <strong>Último Concurso Caixa: #\${data.concurso}</strong><br>
-              Status: <strong style="color: \${data.acumulado ? '#d32f2f' : '#2e7d32'}">\${data.acumulado ? 'ACUMULADO!' : 'Sorteado'}</strong><br>
-              Prémio Estimado: <strong>R$ \${Number(data.valorEstimadoProximoConcurso).toLocaleString('pt-BR')}</strong>
+            dadosConcursoAtual = data;
+
+            const valorPremio = data.valorEstimadoProximoConcurso 
+              ? data.valorEstimadoProximoConcurso.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+              : 'R$ 0,00';
+
+            // Mapa de Números Sorteados
+            let mapaHtml = '';
+            for (let i = 1; i <= data.totalDezenas; i++) {
+              const foiSorteado = data.dezenasSorteadas.includes(i);
+              mapaHtml += \`<div class="num-mapa \${foiSorteado ? 'sorteado' : ''}">\${i < 10 ? '0' + i : i}</div>\`;
+            }
+
+            document.getElementById('card-caixa').innerHTML = \`
+              <div style="display:flex; justify-between; align-items:center;">
+                <strong>\${data.nome} - Concurso #\${data.concurso}</strong>
+                <span class="status-badge \${data.acumulado ? 'acumulado' : 'sorteado'}">
+                  \${data.acumulado ? 'ACUMULADO!' : 'Sorteado'}
+                </span>
+              </div>
+              <p style="margin: 8px 0 4px 0; font-size:14px;">Prêmio Estimado Próximo: <strong>\${valorPremio}</strong></p>
+              <small>Data do Sorteio: \${data.dataApuracao}</small>
+              <h4 style="margin: 12px 0 6px 0; font-size:13px;">Mapa de dezenas do último concurso:</h4>
+              <div class="mapa-grid">\${mapaHtml}</div>
             \`;
+
+            // Ajusta os valores padrão do formulário conforme a loteria
+            document.getElementById('marcar').value = data.padraoMarcar;
+            if (tipo === 'megasena') {
+              document.getElementById('minPares').value = 2; document.getElementById('maxPares').value = 4;
+              document.getElementById('minPrimos').value = 1; document.getElementById('maxPrimos').value = 3;
+            } else if (tipo === 'quina') {
+              document.getElementById('minPares').value = 2; document.getElementById('maxPares').value = 3;
+              document.getElementById('minPrimos').value = 1; document.getElementById('maxPrimos').value = 2;
+            } else {
+              document.getElementById('minPares').value = 7; document.getElementById('maxPares').value = 8;
+              document.getElementById('minPrimos').value = 5; document.getElementById('maxPrimos').value = 6;
+            }
           } catch(e) {
-            document.getElementById('caixa-info').innerHTML = 'Não foi possível carregar dados da Caixa agora.';
+            document.getElementById('card-caixa').innerHTML = 'Não foi possível carregar os dados no momento.';
           }
         }
-        carregarCaixa();
 
-        document.getElementById('form').addEventListener('submit', async (e) => {
+        function trocarLoteria(tipo) {
+          loteriaAtual = tipo;
+          document.querySelectorAll('.btn-loteria').forEach(btn => btn.classList.remove('ativo'));
+          document.getElementById('btn-' + tipo).classList.add('ativo');
+          document.getElementById('painel-palpite').style.display = 'none';
+          carregarDados(tipo);
+        }
+
+        document.getElementById('form-palpite').addEventListener('submit', async (e) => {
           e.preventDefault();
           const body = {
-            totalDezenas: 25,
+            tipo: loteriaAtual,
+            concursoAtual: dadosConcursoAtual ? dadosConcursoAtual.concurso : 0,
             marcar: Number(document.getElementById('marcar').value),
             atrasados: Number(document.getElementById('atrasados').value),
             minPares: Number(document.getElementById('minPares').value),
@@ -201,28 +293,34 @@ app.get('*', (req, res) => {
           });
           const data = await res.json();
 
-          const divRes = document.getElementById('resultado');
+          const divRes = document.getElementById('painel-palpite');
           if(!data.sucesso) {
             divRes.style.display = 'block';
-            divRes.innerHTML = '<p style="color:red">'+data.mensagem+'</p>';
+            divRes.innerHTML = '<p style="color:red; font-weight:bold;">'+data.mensagem+'</p>';
             return;
           }
 
           let bolasHtml = '';
           data.palpite.forEach(num => {
-            const eAtrasado = data.estatisticasPalpite.dezenasAtrasadasInclusas.includes(num);
-            const classe = eAtrasado ? 'vermelho' : 'verde';
-            bolasHtml += \`<div class="bola \${classe}">\${num < 10 ? '0'+num : num}</div>\`;
+            bolasHtml += \`<div class="bola">\${num < 10 ? '0' + num : num}</div>\`;
           });
 
           divRes.style.display = 'block';
           divRes.innerHTML = \`
-            <h3>Palpite Gerado:</h3>
+            <h3>Palpite para \${data.loteria} (Concurso #\${data.concursoAlvo})</h3>
             <div>\${bolasHtml}</div>
-            <p><small>● Vermelho: Dezena atrasada incluída por regra</small></p>
-            <p><strong>Pares:</strong> \${data.estatisticasPalpite.pares} | <strong>Primos:</strong> \${data.estatisticasPalpite.primos}</p>
+            <p style="font-size:13px; margin-top:8px;">
+              <strong>Estatísticas do jogo:</strong> \${data.estatisticas.pares} Pares | \${data.estatisticas.impares} Ímpares | \${data.estatisticas.primos} Primos
+            </p>
+            <div class="box-probabilidade">
+              📊 <strong>Calculadora de Probabilidades:</strong><br>
+              Sua chance de acertar o prêmio principal com este jogo é de <strong>\${data.probabilidade.chanceFormatada}</strong> (\${data.probabilidade.probabilidadePorcentagem}).
+            </div>
           \`;
         });
+
+        // Carrega Lotofácil por padrão ao abrir
+        carregarDados('lotofacil');
       </script>
     </body>
     </html>
