@@ -6,11 +6,13 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Configuração das Loterias
+// Configuração Expandida de Loterias
 const CONFIG_LOTERIAS = {
   lotofacil: { nome: 'Lotofácil', totalDezenas: 25, padraoMarcar: 15, primos: [2, 3, 5, 7, 11, 13, 17, 19, 23] },
   megasena: { nome: 'Mega-Sena', totalDezenas: 60, padraoMarcar: 6, primos: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59] },
-  quina: { nome: 'Quina', totalDezenas: 80, padraoMarcar: 5, primos: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79] }
+  quina: { nome: 'Quina', totalDezenas: 80, padraoMarcar: 5, primos: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79] },
+  diadesorte: { nome: 'Dia de Sorte', totalDezenas: 31, padraoMarcar: 7, primos: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31] },
+  timemania: { nome: 'Timemania', totalDezenas: 80, padraoMarcar: 10, primos: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79] }
 };
 
 // Cálculo de Probabilidade Simples
@@ -33,7 +35,7 @@ function calcularProbabilidade(totalNumeros, dezenasMarcadas) {
   };
 }
 
-// Rota de Concurso
+// Rota de Concurso Automático
 app.get('/api/concurso/:tipo', async (req, res) => {
   const tipo = req.params.tipo.toLowerCase();
   const config = CONFIG_LOTERIAS[tipo] || CONFIG_LOTERIAS.lotofacil;
@@ -41,13 +43,13 @@ app.get('/api/concurso/:tipo', async (req, res) => {
   let dadosFormatados = null;
 
   try {
-    const resp = await axios.get(`https://loteriascaixa-api.herokuapp.com/api/${tipo}/latest`, { timeout: 3000 });
+    const resp = await axios.get(`https://loteriascaixa-api.herokuapp.com/api/${tipo}/latest`, { timeout: 3500 });
     const d = resp.data;
-    if (d && d.concurso) {
+    if (d && (d.concurso || d.numero)) {
       dadosFormatados = {
         tipo: tipo,
         nome: config.nome,
-        concurso: Number(d.concurso) || 0,
+        concurso: Number(d.concurso || d.numero) || 0,
         dataApuracao: d.data || 'Recente',
         dezenasSorteadas: (d.dezenas || []).map(Number),
         acumulado: Boolean(d.acumulou),
@@ -85,9 +87,7 @@ app.get('/api/concurso/:tipo', async (req, res) => {
       nome: config.nome,
       concurso: 3000,
       dataApuracao: 'Atualizado hoje',
-      dezenasSorteadas: tipo === 'lotofacil' 
-        ? [1, 2, 4, 6, 8, 9, 10, 11, 13, 15, 17, 18, 20, 22, 25] 
-        : [5, 12, 23, 34, 45, 56],
+      dezenasSorteadas: [1, 2, 4, 6, 8, 9, 10, 11, 13, 15, 17, 18, 20, 22, 25],
       acumulado: true,
       valorEstimadoProximoConcurso: 1700000,
       totalDezenas: config.totalDezenas,
@@ -138,6 +138,7 @@ app.post('/api/palpite', (req, res) => {
   res.json({
     sucesso: true,
     loteria: config.nome,
+    tipo: tipo,
     concursoAlvo: concursoAtual ? Number(concursoAtual) + 1 : 'Próximo',
     palpite: palpite,
     probabilidade: estatisticasProbabilidade,
@@ -149,7 +150,7 @@ app.post('/api/palpite', (req, res) => {
   });
 });
 
-// Interface Web Frontend com Histórico
+// Interface Web
 app.get('*', (req, res) => {
   res.send(`
     <!DOCTYPE html>
@@ -157,18 +158,17 @@ app.get('*', (req, res) => {
     <head>
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>Portal de Loterias</title>
+      <title>Portal de Loterias & Conferência</title>
       <style>
         body { font-family: 'Segoe UI', Arial, sans-serif; background: #f0f2f5; margin: 0; padding: 15px; color: #333; }
         .container { max-width: 600px; margin: 0 auto; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
         
-        /* Abas Principais */
         .nav-abas { display: flex; border-bottom: 2px solid #e0e0e0; margin-bottom: 20px; }
-        .aba-item { flex: 1; padding: 12px; text-align: center; font-weight: bold; cursor: pointer; color: #666; border-bottom: 3px solid transparent; }
+        .aba-item { flex: 1; padding: 12px; text-align: center; font-weight: bold; cursor: pointer; color: #666; border-bottom: 3px solid transparent; font-size: 14px; }
         .aba-item.ativa { color: #0288d1; border-bottom-color: #0288d1; }
 
-        .seletor-loteria { display: flex; gap: 8px; margin-bottom: 20px; }
-        .btn-loteria { flex: 1; padding: 10px; border: 2px solid #0288d1; background: white; color: #0288d1; border-radius: 6px; font-weight: bold; cursor: pointer; text-align: center; }
+        .seletor-loteria { display: flex; gap: 6px; margin-bottom: 20px; overflow-x: auto; padding-bottom: 5px; }
+        .btn-loteria { flex: 1; min-width: 85px; padding: 8px 4px; border: 2px solid #0288d1; background: white; color: #0288d1; border-radius: 6px; font-weight: bold; cursor: pointer; text-align: center; font-size: 12px; white-space: nowrap; }
         .btn-loteria.ativo { background: #0288d1; color: white; }
         
         .card-concurso { background: #e3f2fd; padding: 16px; border-radius: 8px; margin-bottom: 20px; }
@@ -189,28 +189,30 @@ app.get('*', (req, res) => {
         button.btn-salvar { width: 100%; padding: 10px; background: #ff9800; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; margin-top: 12px; }
         
         .painel-resultado { margin-top: 20px; padding-top: 15px; border-top: 2px dashed #ddd; }
-        .bola { display: inline-flex; width: 36px; height: 36px; border-radius: 50%; background: #0288d1; color: white; justify-content: center; align-items: center; font-weight: bold; margin: 3px; font-size: 14px; }
+        .bola { display: inline-flex; width: 34px; height: 34px; border-radius: 50%; background: #0288d1; color: white; justify-content: center; align-items: center; font-weight: bold; margin: 3px; font-size: 13px; }
+        .bola.acerto { background: #2e7d32; border: 2px solid #1b5e20; box-shadow: 0 0 6px rgba(46,125,50,0.6); }
+        
         .box-probabilidade { background: #fff3e0; padding: 10px; border-radius: 6px; margin-top: 10px; border-left: 4px solid #ff9800; font-size: 13px; }
         
-        /* Estilos do Histórico */
         .card-historico { background: #f8f9fa; border: 1px solid #e0e0e0; border-radius: 8px; padding: 15px; margin-bottom: 12px; position: relative; }
         .btn-apagar { position: absolute; top: 12px; right: 12px; background: #ff3d00; color: white; border: none; border-radius: 4px; padding: 4px 8px; cursor: pointer; font-size: 12px; }
+        .badge-acertos { background: #e8f5e9; color: #2e7d32; border: 1px solid #a5d6a7; padding: 6px 10px; border-radius: 6px; font-weight: bold; font-size: 13px; margin: 8px 0; display: inline-block; }
       </style>
     </head>
     <body>
       <div class="container">
-        <!-- Navegação por Abas -->
         <div class="nav-abas">
           <div class="aba-item ativa" id="aba-gerador-btn" onclick="mudarAba('gerador')">Gerar Palpites</div>
-          <div class="aba-item" id="aba-historico-btn" onclick="mudarAba('historico')">Meus Jogos Salvos (<span id="qtd-salvos">0</span>)</div>
+          <div class="aba-item" id="aba-historico-btn" onclick="mudarAba('historico')">Conferir Salvos (<span id="qtd-salvos">0</span>)</div>
         </div>
         
-        <!-- Conteúdo 1: Gerador de Palpites -->
         <div id="secao-gerador">
           <div class="seletor-loteria">
             <div class="btn-loteria ativo" id="btn-lotofacil" onclick="trocarLoteria('lotofacil')">Lotofácil</div>
             <div class="btn-loteria" id="btn-megasena" onclick="trocarLoteria('megasena')">Mega-Sena</div>
             <div class="btn-loteria" id="btn-quina" onclick="trocarLoteria('quina')">Quina</div>
+            <div class="btn-loteria" id="btn-diadesorte" onclick="trocarLoteria('diadesorte')">Dia de Sorte</div>
+            <div class="btn-loteria" id="btn-timemania" onclick="trocarLoteria('timemania')">Timemania</div>
           </div>
 
           <div id="card-caixa" class="card-concurso">
@@ -237,10 +239,9 @@ app.get('*', (req, res) => {
           <div id="painel-palpite" class="painel-resultado" style="display:none;"></div>
         </div>
 
-        <!-- Conteúdo 2: Meus Jogos Salvos -->
         <div id="secao-historico" style="display:none;">
-          <h3>Histórico de Jogos Guardados</h3>
-          <p style="font-size:13px; color:#666;">Estes são os palpites que guardou para jogar nas lotarias.</p>
+          <h3>Conferência Automática dos Salvos</h3>
+          <p style="font-size:13px; color:#666;">Conferimos seus jogos salvos em tempo real com o último resultado sorteado.</p>
           <div id="lista-jogos"></div>
         </div>
       </div>
@@ -249,6 +250,7 @@ app.get('*', (req, res) => {
         let loteriaAtual = 'lotofacil';
         let dadosConcursoAtual = null;
         let palpiteAtual = null;
+        let cacheResultados = {};
 
         function mudarAba(aba) {
           if(aba === 'gerador') {
@@ -261,7 +263,7 @@ app.get('*', (req, res) => {
             document.getElementById('secao-historico').style.display = 'block';
             document.getElementById('aba-gerador-btn').classList.remove('ativa');
             document.getElementById('aba-historico-btn').classList.add('ativa');
-            renderizarHistorico();
+            renderizarEConferirHistorico();
           }
         }
 
@@ -271,6 +273,7 @@ app.get('*', (req, res) => {
             const res = await fetch('/api/concurso/' + tipo);
             const data = await res.json();
             dadosConcursoAtual = data;
+            cacheResultados[tipo] = data;
 
             const valorPremio = (data.valorEstimadoProximoConcurso && data.valorEstimadoProximoConcurso > 0)
               ? data.valorEstimadoProximoConcurso.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -302,6 +305,12 @@ app.get('*', (req, res) => {
             } else if (tipo === 'quina') {
               document.getElementById('minPares').value = 2; document.getElementById('maxPares').value = 3;
               document.getElementById('minPrimos').value = 1; document.getElementById('maxPrimos').value = 2;
+            } else if (tipo === 'diadesorte') {
+              document.getElementById('minPares').value = 3; document.getElementById('maxPares').value = 4;
+              document.getElementById('minPrimos').value = 2; document.getElementById('maxPrimos').value = 3;
+            } else if (tipo === 'timemania') {
+              document.getElementById('minPares').value = 4; document.getElementById('maxPares').value = 6;
+              document.getElementById('minPrimos').value = 2; document.getElementById('maxPrimos').value = 4;
             } else {
               document.getElementById('minPares').value = 7; document.getElementById('maxPares').value = 8;
               document.getElementById('minPrimos').value = 5; document.getElementById('maxPrimos').value = 6;
@@ -368,7 +377,6 @@ app.get('*', (req, res) => {
           \`;
         });
 
-        // Lógica do LocalStorage (Histórico Salvo)
         function obterJogosSalvos() {
           return JSON.parse(localStorage.getItem('meus_jogos_loterias') || '[]');
         }
@@ -384,6 +392,7 @@ app.get('*', (req, res) => {
           
           const novoJogo = {
             id: Date.now(),
+            tipo: palpiteAtual.tipo || loteriaAtual,
             dataCriacao: new Date().toLocaleDateString('pt-BR') + ' às ' + new Date().toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'}),
             loteria: palpiteAtual.loteria,
             concursoAlvo: palpiteAtual.concursoAlvo,
@@ -401,10 +410,10 @@ app.get('*', (req, res) => {
           salvos = salvos.filter(j => j.id !== id);
           localStorage.setItem('meus_jogos_loterias', JSON.stringify(salvos));
           atualizarContador();
-          renderizarHistorico();
+          renderizarEConferirHistorico();
         }
 
-        function renderizarHistorico() {
+        async function renderizarEConferirHistorico() {
           const salvos = obterJogosSalvos();
           const divLista = document.getElementById('lista-jogos');
 
@@ -413,19 +422,47 @@ app.get('*', (req, res) => {
             return;
           }
 
+          divLista.innerHTML = '<p style="color:#0288d1; text-align:center;">Conferindo acertos com o último sorteio...</p>';
+
+          // Busca dados das loterias necessárias para a conferência
+          const tiposNecessarios = [...new Set(salvos.map(j => j.tipo || 'lotofacil'))];
+          for(let tipo of tiposNecessarios) {
+            if(!cacheResultados[tipo]) {
+              try {
+                const r = await fetch('/api/concurso/' + tipo);
+                cacheResultados[tipo] = await r.json();
+              } catch(e){}
+            }
+          }
+
           let html = '';
           salvos.forEach(jogo => {
+            const tipoJogo = jogo.tipo || 'lotofacil';
+            const resultadoLoteria = cacheResultados[tipoJogo];
+            const dezenasSorteadas = resultadoLoteria ? (resultadoLoteria.dezenasSorteadas || []) : [];
+
+            let qtdAcertos = 0;
             let bolasHtml = '';
+
             jogo.palpite.forEach(num => {
-              bolasHtml += \`<div class="bola">\${num < 10 ? '0' + num : num}</div>\`;
+              const acertou = dezenasSorteadas.includes(num);
+              if(acertou) qtdAcertos++;
+              bolasHtml += \`<div class="bola \${acertou ? 'acerto' : ''}">\${num < 10 ? '0' + num : num}\${acertou ? '✓' : ''}</div>\`;
             });
 
             html += \`
               <div class="card-historico">
                 <button class="btn-apagar" onclick="apagarJogo(\${jogo.id})">Apagar</button>
-                <strong>\${jogo.loteria} - Concurso #\${jogo.concursoAlvo}</strong><br>
-                <small style="color:#777;">Guardado em: \${jogo.dataCriacao}</small>
-                <div style="margin-top:10px;">\${bolasHtml}</div>
+                <strong>\${jogo.loteria} - Concurso Alvo #\${jogo.concursoAlvo}</strong><br>
+                <small style="color:#777;">Guardado em: \${jogo.dataCriacao}</small><br>
+                
+                \${resultadoLoteria ? \`
+                  <div class="badge-acertos">
+                    🎯 \${qtdAcertos} Acerto(s) comparado ao Concurso #\${resultadoLoteria.concurso}
+                  </div>
+                \` : ''}
+
+                <div style="margin-top:8px;">\${bolasHtml}</div>
               </div>
             \`;
           });
@@ -433,7 +470,6 @@ app.get('*', (req, res) => {
           divLista.innerHTML = html;
         }
 
-        // Inicialização
         carregarDados('lotofacil');
         atualizarContador();
       </script>
